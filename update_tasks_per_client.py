@@ -19,13 +19,13 @@ def handler(pd: "pipedream"):
         "Content-Type": "application/json"
     }
 
-    # Step 1: Query the Clients database to find pages with "Phase" = "Sustaining: Update Program"
+    # Step 1: Query the Clients database to find pages with "Phase" = "Sustaining"
     query_url = f"https://api.notion.com/v1/databases/{clients_database_id}/query"
     query_payload = {
         "filter": {
             "property": "Phase",
             "select": {
-                "equals": "Sustaining: Update Program"
+                "equals": "Sustaining"
             }
         }
     }
@@ -36,16 +36,16 @@ def handler(pd: "pipedream"):
     clients = response.json().get("results", [])
 
     if not clients:
-        print("No clients found with 'Sustaining: Update Program'.")
+        print("No clients found with 'Sustaining'.")
     else:
         for client in clients:
             client_id = client["id"]
             client_name = client["properties"]["Name"]["title"][0]["text"]["content"]
             task_date = datetime.today().strftime('%Y-%m-%d')
 
-            # Get the current Update Counter and Update Freq (weeks)
-            update_counter = client["properties"].get("Update Counter", {}).get("number", 0)
-            update_freq_weeks = client["properties"].get("Update Freq (weeks)", {}).get("number", 0)
+            # Get the current Weeks in Program and Program Length
+            update_counter = client["properties"].get("Weeks in Program", {}).get("number", 0)
+            update_freq_weeks = client["properties"].get("Program Length", {}).get("number", 0)
 
             # Fetch the template page's update_icon, update_cover, and content
             template_page_response = requests.get(
@@ -62,14 +62,14 @@ def handler(pd: "pipedream"):
             )
             template_content = template_content_response.json().get("results", [])
 
-            # Step 2: Increment the "Update Counter" property for the client
+            # Step 2: Increment the "Weeks in Program" property for the client
             new_update_counter = update_counter + 1
 
             # Update the client with the new counter value
             update_client_url = f"https://api.notion.com/v1/pages/{client_id}"
             update_client_payload = {
                 "properties": {
-                    "Update Counter": {
+                    "Weeks in Program": {
                         "number": new_update_counter
                     }
                 }
@@ -85,7 +85,7 @@ def handler(pd: "pipedream"):
             if new_update_counter == update_freq_weeks:
                 # Fetch the dev template content
                     dev_template_content_response = requests.get(
-                        f"https://api.notion.com/v1/blocks/{review_template}/children",
+                        f"https://api.notion.com/v1/blocks/{dev_template}/children",
                         headers=headers
                     )
                     dev_template_content = dev_template_content_response.json().get("results", [])
@@ -93,17 +93,17 @@ def handler(pd: "pipedream"):
                     # Create a new task in the Tasks database using the dev template content
                     dev_task_name = f"{client_name} Program Update"
 
-                    # Fetch the template page's review_icon, review_cover, and content
+                    # Fetch the template page's dev_icon, dev_cover, and content
                     template_page_response = requests.get(
-                        f"https://api.notion.com/v1/pages/{review_template}",
+                        f"https://api.notion.com/v1/pages/{dev_template}",
                         headers=headers
                     )
                     template_page = template_page_response.json()
-                    review_icon = template_page.get("icon")
-                    review_cover = template_page.get("cover")
+                    dev_icon = template_page.get("icon")
+                    dev_cover = template_page.get("cover")
 
                     template_content_response = requests.get(
-                        f"https://api.notion.com/v1/blocks/{review_template}/children",
+                        f"https://api.notion.com/v1/blocks/{dev_template}/children",
                         headers=headers
                     )
                     template_content = template_content_response.json().get("results", [])
@@ -136,8 +136,8 @@ def handler(pd: "pipedream"):
                             }
                         },
                         "children": dev_template_content,  # Use the content fetched from the primary template
-                        "icon": review_icon,                   # Include the update_icon (emoji) from the template
-                        "cover": review_cover                  # Include the update_cover image from the template
+                        "icon": dev_icon,                   # Include the update_icon (emoji) from the template
+                        "cover": dev_cover                  # Include the update_cover image from the template
                     }
 
                     dev_task_response = requests.post(create_task_url, json=create_dev_task_payload, headers=headers)
@@ -149,13 +149,13 @@ def handler(pd: "pipedream"):
                         dev_task_id = dev_task_response.json().get("id")
                         print(f"Created dev task for {client_name}: {dev_task_id}")
 
-                    # Update counter to 0 once new Program Development task created
+                    # Update counter to 1 once new Program Development task created
                     new_update_counter = 0
 
                     update_client_url = f"https://api.notion.com/v1/pages/{client_id}"
                     update_client_payload = {
                         "properties": {
-                            "Update Counter": {
+                            "Weeks in Program": {
                                 "number": new_update_counter
                             }
                         }
@@ -211,28 +211,28 @@ def handler(pd: "pipedream"):
                     task_id = task_response.json().get("id")
                     print(f"Created task for {client_name}: {task_id}")
 
-                # Step 4: Check if the update_counter equals "Update Freq (weeks)" minus 1
+                # Step 4: Check if the update_counter equals "Program Length" minus 1
                 if new_update_counter == update_freq_weeks - 1:
-                    print(f"Creating additional task for {client_name} using the secondary template")
+                    print(f"Creating additional task for {client_name} using the check_in template")
 
-                    # Fetch the secondary template content
-                    secondary_template_content_response = requests.get(
+                    # Fetch the check_in template content
+                    check_in_template_content_response = requests.get(
                         f"https://api.notion.com/v1/blocks/{review_template}/children",
                         headers=headers
                     )
-                    secondary_template_content = secondary_template_content_response.json().get("results", [])
+                    check_in_template_content = check_in_template_content_response.json().get("results", [])
 
-                    # Create a new task in the Tasks database using the secondary template content
-                    secondary_task_name = f"{client_name} Program Update"
+                    # Create a new task in the Tasks database using the check_in template content
+                    check_in_task_name = f"{client_name} Check In"
 
-                    # Fetch the template page's review_icon, review_cover, and content
+                    # Fetch the template page's dev_icon, dev_cover, and content
                     template_page_response = requests.get(
                         f"https://api.notion.com/v1/pages/{review_template}",
                         headers=headers
                     )
                     template_page = template_page_response.json()
-                    review_icon = template_page.get("icon")
-                    review_cover = template_page.get("cover")
+                    dev_icon = template_page.get("icon")
+                    dev_cover = template_page.get("cover")
 
                     template_content_response = requests.get(
                         f"https://api.notion.com/v1/blocks/{review_template}/children",
@@ -240,7 +240,7 @@ def handler(pd: "pipedream"):
                     )
                     template_content = template_content_response.json().get("results", [])
 
-                    create_secondary_task_payload = {
+                    create_check_in_task_payload = {
                         "parent": {
                             "database_id": tasks_database_id
                         },
@@ -249,7 +249,7 @@ def handler(pd: "pipedream"):
                                 "title": [
                                     {
                                         "text": {
-                                            "content": secondary_task_name
+                                            "content": check_in_task_name
                                         }
                                     }
                                 ]
@@ -267,16 +267,16 @@ def handler(pd: "pipedream"):
                                 }
                             }
                         },
-                        "children": secondary_template_content,  # Use the content fetched from the primary template
-                        "icon": review_icon,                   # Include the update_icon (emoji) from the template
-                        "cover": review_cover                  # Include the update_cover image from the template
+                        "children": check_in_template_content,  # Use the content fetched from the primary template
+                        "icon": dev_icon,                   # Include the update_icon (emoji) from the template
+                        "cover": dev_cover                  # Include the update_cover image from the template
                     }
 
-                    secondary_task_response = requests.post(create_task_url, json=create_secondary_task_payload, headers=headers)
+                    check_in_task_response = requests.post(create_task_url, json=create_check_in_task_payload, headers=headers)
                     
-                    if secondary_task_response.status_code != 200:
-                        print(f"Error creating secondary task for {client_name}: {secondary_task_response.status_code}")
-                        print(f"Error response: {secondary_task_response.json()}")
+                    if check_in_task_response.status_code != 200:
+                        print(f"Error creating check_in task for {client_name}: {check_in_task_response.status_code}")
+                        print(f"Error response: {check_in_task_response.json()}")
                     else:
-                        secondary_task_id = secondary_task_response.json().get("id")
-                        print(f"Created secondary task for {client_name}: {secondary_task_id}")
+                        check_in_task_id = check_in_task_response.json().get("id")
+                        print(f"Created check_in task for {client_name}: {check_in_task_id}")
