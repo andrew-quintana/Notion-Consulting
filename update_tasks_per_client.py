@@ -87,7 +87,7 @@ def handler(pd: "pipedream"):
                 print(f"Error updating counter for {client_name}: {update_client_response.status_code}")
                 print(f"Error response: {update_client_response.json()}")
 
-            # Step 2: Check if not final week of program
+            # Step 2: Check if not initial week of program
             if new_update_counter != update_freq_weeks:
                 task_name = f"{client_name} Workout Update"
                 
