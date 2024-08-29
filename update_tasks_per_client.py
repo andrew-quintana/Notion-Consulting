@@ -19,13 +19,13 @@ def handler(pd: "pipedream"):
         "Content-Type": "application/json"
     }
 
-    # Step 1: Query the Clients database to find pages with "Phase" = "Sustaining"
+    # Step 1: Query the Clients database to find pages with "Phase" = "Ongoing Support"
     query_url = f"https://api.notion.com/v1/databases/{clients_database_id}/query"
     query_payload = {
         "filter": {
             "property": "Phase",
             "select": {
-                "equals": "Sustaining"
+                "equals": "Ongoing Support"
             }
         }
     }
@@ -36,16 +36,17 @@ def handler(pd: "pipedream"):
     clients = response.json().get("results", [])
 
     if not clients:
-        print("No clients found with 'Sustaining'.")
+        print("No clients found with 'Ongoing Support'.")
     else:
         for client in clients:
             client_id = client["id"]
             client_name = client["properties"]["Name"]["title"][0]["text"]["content"]
             task_date = datetime.today().strftime('%Y-%m-%d')
 
-            # Get the current Weeks in Program and Program Length
-            update_counter = client["properties"].get("Weeks in Program", {}).get("number", 0)
+            # Get the current Week in Program and Program Length
+            update_counter = client["properties"].get("Week in Program", {}).get("number", 0)
             update_freq_weeks = client["properties"].get("Program Length", {}).get("number", 0)
+            update_client_url = f"https://api.notion.com/v1/pages/{client_id}"
 
             # Fetch the template page's update_icon, update_cover, and content
             template_page_response = requests.get(
@@ -62,114 +63,34 @@ def handler(pd: "pipedream"):
             )
             template_content = template_content_response.json().get("results", [])
 
-            # Step 2: Increment the "Weeks in Program" property for the client
+            # Step 1: Increment the "Week in Program" property for the client
             new_update_counter = update_counter + 1
 
-            # Update the client with the new counter value
-            update_client_url = f"https://api.notion.com/v1/pages/{client_id}"
+            if new_update_counter > update_freq_weeks:
+                # Update counter to 1 once threshold reached
+                new_update_counter = 1
+
+            # create update payload
             update_client_payload = {
-                "properties": {
-                    "Weeks in Program": {
-                        "number": new_update_counter
+                    "properties": {
+                        "Week in Program": {
+                            "number": new_update_counter
+                        }
                     }
                 }
-            }
+                
+            create_task_url = "https://api.notion.com/v1/pages"
+
             update_client_response = requests.patch(update_client_url, json=update_client_payload, headers=headers)
             
             if update_client_response.status_code != 200:
                 print(f"Error updating counter for {client_name}: {update_client_response.status_code}")
                 print(f"Error response: {update_client_response.json()}")
 
-            create_task_url = "https://api.notion.com/v1/pages"
-
-            if new_update_counter == update_freq_weeks:
-                # Fetch the dev template content
-                    dev_template_content_response = requests.get(
-                        f"https://api.notion.com/v1/blocks/{dev_template}/children",
-                        headers=headers
-                    )
-                    dev_template_content = dev_template_content_response.json().get("results", [])
-
-                    # Create a new task in the Tasks database using the dev template content
-                    dev_task_name = f"{client_name} Program Update"
-
-                    # Fetch the template page's dev_icon, dev_cover, and content
-                    template_page_response = requests.get(
-                        f"https://api.notion.com/v1/pages/{dev_template}",
-                        headers=headers
-                    )
-                    template_page = template_page_response.json()
-                    dev_icon = template_page.get("icon")
-                    dev_cover = template_page.get("cover")
-
-                    template_content_response = requests.get(
-                        f"https://api.notion.com/v1/blocks/{dev_template}/children",
-                        headers=headers
-                    )
-                    template_content = template_content_response.json().get("results", [])
-
-                    create_dev_task_payload = {
-                        "parent": {
-                            "database_id": tasks_database_id
-                        },
-                        "properties": {
-                            "Name": {
-                                "title": [
-                                    {
-                                        "text": {
-                                            "content": dev_task_name
-                                        }
-                                    }
-                                ]
-                            },
-                            "Client": {
-                                "relation": [
-                                    {
-                                        "id": client_id
-                                    }
-                                ]
-                            },
-                            "Date": {
-                                "date": {
-                                    "start": task_date
-                                }
-                            }
-                        },
-                        "children": dev_template_content,  # Use the content fetched from the primary template
-                        "icon": dev_icon,                   # Include the update_icon (emoji) from the template
-                        "cover": dev_cover                  # Include the update_cover image from the template
-                    }
-
-                    dev_task_response = requests.post(create_task_url, json=create_dev_task_payload, headers=headers)
-                    
-                    if dev_task_response.status_code != 200:
-                        print(f"Error creating dev task for {client_name}: {dev_task_response.status_code}")
-                        print(f"Error response: {dev_task_response.json()}")
-                    else:
-                        dev_task_id = dev_task_response.json().get("id")
-                        print(f"Created dev task for {client_name}: {dev_task_id}")
-
-                    # Update counter to 1 once new Program Development task created
-                    new_update_counter = 0
-
-                    update_client_url = f"https://api.notion.com/v1/pages/{client_id}"
-                    update_client_payload = {
-                        "properties": {
-                            "Weeks in Program": {
-                                "number": new_update_counter
-                            }
-                        }
-                    }
-                    update_client_response = requests.patch(update_client_url, json=update_client_payload, headers=headers)
-                    
-                    if update_client_response.status_code != 200:
-                        print(f"Error updating counter for {client_name}: {update_client_response.status_code}")
-                        print(f"Error response: {update_client_response.json()}")
-
-            else:
+            # Step 2: Check if not final week of program
+            if new_update_counter != update_freq_weeks:
                 task_name = f"{client_name} Workout Update"
                 
-                # Step 3: Create a new task in the Tasks database using the primary template content
                 create_task_payload = {
                     "parent": {
                         "database_id": tasks_database_id
@@ -211,72 +132,141 @@ def handler(pd: "pipedream"):
                     task_id = task_response.json().get("id")
                     print(f"Created task for {client_name}: {task_id}")
 
-                # Step 4: Check if the update_counter equals "Program Length" minus 1
-                if new_update_counter == update_freq_weeks - 1:
-                    print(f"Creating additional task for {client_name} using the check_in template")
+            # Step 3: Check if next week requires program update
+            if new_update_counter == update_freq_weeks:
+                # Fetch the dev template content
+                dev_template_content_response = requests.get(
+                    f"https://api.notion.com/v1/blocks/{dev_template}/children",
+                    headers=headers
+                )
+                dev_template_content = dev_template_content_response.json().get("results", [])
 
-                    # Fetch the check_in template content
-                    check_in_template_content_response = requests.get(
-                        f"https://api.notion.com/v1/blocks/{review_template}/children",
-                        headers=headers
-                    )
-                    check_in_template_content = check_in_template_content_response.json().get("results", [])
+                # Create a new task in the Tasks database using the dev template content
+                dev_task_name = f"{client_name} Program Development"
 
-                    # Create a new task in the Tasks database using the check_in template content
-                    check_in_task_name = f"{client_name} Check In"
+                # Fetch the template page's dev_icon, dev_cover, and content
+                template_page_response = requests.get(
+                    f"https://api.notion.com/v1/pages/{dev_template}",
+                    headers=headers
+                )
+                template_page = template_page_response.json()
+                dev_icon = template_page.get("icon")
+                dev_cover = template_page.get("cover")
 
-                    # Fetch the template page's dev_icon, dev_cover, and content
-                    template_page_response = requests.get(
-                        f"https://api.notion.com/v1/pages/{review_template}",
-                        headers=headers
-                    )
-                    template_page = template_page_response.json()
-                    dev_icon = template_page.get("icon")
-                    dev_cover = template_page.get("cover")
+                template_content_response = requests.get(
+                    f"https://api.notion.com/v1/blocks/{dev_template}/children",
+                    headers=headers
+                )
+                template_content = template_content_response.json().get("results", [])
 
-                    template_content_response = requests.get(
-                        f"https://api.notion.com/v1/blocks/{review_template}/children",
-                        headers=headers
-                    )
-                    template_content = template_content_response.json().get("results", [])
-
-                    create_check_in_task_payload = {
-                        "parent": {
-                            "database_id": tasks_database_id
-                        },
-                        "properties": {
-                            "Name": {
-                                "title": [
-                                    {
-                                        "text": {
-                                            "content": check_in_task_name
-                                        }
+                create_dev_task_payload = {
+                    "parent": {
+                        "database_id": tasks_database_id
+                    },
+                    "properties": {
+                        "Name": {
+                            "title": [
+                                {
+                                    "text": {
+                                        "content": dev_task_name
                                     }
-                                ]
-                            },
-                            "Client": {
-                                "relation": [
-                                    {
-                                        "id": client_id
-                                    }
-                                ]
-                            },
-                            "Date": {
-                                "date": {
-                                    "start": task_date
                                 }
-                            }
+                            ]
                         },
-                        "children": check_in_template_content,  # Use the content fetched from the primary template
-                        "icon": dev_icon,                   # Include the update_icon (emoji) from the template
-                        "cover": dev_cover                  # Include the update_cover image from the template
-                    }
+                        "Client": {
+                            "relation": [
+                                {
+                                    "id": client_id
+                                }
+                            ]
+                        },
+                        "Date": {
+                            "date": {
+                                "start": task_date
+                            }
+                        }
+                    },
+                    "children": dev_template_content,  # Use the content fetched from the primary template
+                    "icon": dev_icon,                   # Include the update_icon (emoji) from the template
+                    "cover": dev_cover                  # Include the update_cover image from the template
+                }
 
-                    check_in_task_response = requests.post(create_task_url, json=create_check_in_task_payload, headers=headers)
-                    
-                    if check_in_task_response.status_code != 200:
-                        print(f"Error creating check_in task for {client_name}: {check_in_task_response.status_code}")
-                        print(f"Error response: {check_in_task_response.json()}")
-                    else:
-                        check_in_task_id = check_in_task_response.json().get("id")
-                        print(f"Created check_in task for {client_name}: {check_in_task_id}")
+                dev_task_response = requests.post(create_task_url, json=create_dev_task_payload, headers=headers)
+                
+                if dev_task_response.status_code != 200:
+                    print(f"Error creating dev task for {client_name}: {dev_task_response.status_code}")
+                    print(f"Error response: {dev_task_response.json()}")
+                else:
+                    dev_task_id = dev_task_response.json().get("id")
+                    print(f"Created dev task for {client_name}: {dev_task_id}")
+                
+            # Step 4: Check if next week requires check in
+            if new_update_counter == update_freq_weeks - 2:
+                print(f"Creating additional task for {client_name} using the check_in template")
+
+                # Fetch the check_in template content
+                check_in_template_content_response = requests.get(
+                    f"https://api.notion.com/v1/blocks/{review_template}/children",
+                    headers=headers
+                )
+                check_in_template_content = check_in_template_content_response.json().get("results", [])
+
+                # Create a new task in the Tasks database using the check_in template content
+                check_in_task_name = f"{client_name} Check In"
+
+                # Fetch the template page's dev_icon, dev_cover, and content
+                template_page_response = requests.get(
+                    f"https://api.notion.com/v1/pages/{review_template}",
+                    headers=headers
+                )
+                template_page = template_page_response.json()
+                dev_icon = template_page.get("icon")
+                dev_cover = template_page.get("cover")
+
+                template_content_response = requests.get(
+                    f"https://api.notion.com/v1/blocks/{review_template}/children",
+                    headers=headers
+                )
+                template_content = template_content_response.json().get("results", [])
+
+                create_check_in_task_payload = {
+                    "parent": {
+                        "database_id": tasks_database_id
+                    },
+                    "properties": {
+                        "Name": {
+                            "title": [
+                                {
+                                    "text": {
+                                        "content": check_in_task_name
+                                    }
+                                }
+                            ]
+                        },
+                        "Client": {
+                            "relation": [
+                                {
+                                    "id": client_id
+                                }
+                            ]
+                        },
+                        "Date": {
+                            "date": {
+                                "start": task_date
+                            }
+                        }
+                    },
+                    "children": check_in_template_content,  # Use the content fetched from the primary template
+                    "icon": dev_icon,                   # Include the update_icon (emoji) from the template
+                    "cover": dev_cover                  # Include the update_cover image from the template
+                }
+
+                check_in_task_response = requests.post(create_task_url, json=create_check_in_task_payload, headers=headers)
+                
+                if check_in_task_response.status_code != 200:
+                    print(f"Error creating check_in task for {client_name}: {check_in_task_response.status_code}")
+                    print(f"Error response: {check_in_task_response.json()}")
+                else:
+                    check_in_task_id = check_in_task_response.json().get("id")
+                    print(f"Created check_in task for {client_name}: {check_in_task_id}")
+                
